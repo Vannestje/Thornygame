@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Thorny Thursday: Crowd Control</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #05030a;
+      overflow: hidden;
+      touch-action: none;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+    }
+    #game-container {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas {
+      background: #05030a;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+            /* On-screen controls – purple console with white D-pad + C/J */
+    .controls {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 35vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      padding: 8px 12px;
+      box-sizing: border-box;
+      pointer-events: none; /* only inner panel can be touched */
+    }
+
+    .controls-inner {
+      pointer-events: auto;
+      width: 100%;
+      max-width: 520px;
+      height: 100%;
+      border-radius: 26px 26px 0 0;
+      background: radial-gradient(circle at 0% 0%, #ff8af4 0%, #b95bff 35%, #7a4dff 75%, #4c38ff 100%);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 24px;
+      box-sizing: border-box;
+    }
+
+    .dpad {
+      position: relative;
+      width: 130px;
+      height: 130px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* round base under D-pad */
+    .dpad::before {
+      content: "";
+      position: absolute;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: #f7f7ff;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.35);
+    }
+
+    .buttons {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn {
+      border: none;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      user-select: none;
+      font-weight: 600;
+      color: #333;
+      background: #fff;
+    }
+
+    /* D-pad arrows (white rounded rectangles) */
+    .btn.small {
+      position: absolute;
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      font-size: 20px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+    }
+    .btn.small[data-dir="up"] {
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .btn.small[data-dir="down"] {
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .btn.small[data-dir="left"] {
+      left: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .btn.small[data-dir="right"] {
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    /* Face buttons C / J */
+    .btn.face {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      font-size: 20px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.35);
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+      background: #ececff;
+    }
+
+
+
+    /* Overlay screens */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0,0,0,0.7);
+      z-index: 10;
+      text-align: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #overlay button {
+      margin-top: 12px;
+      padding: 10px 20px;
+      border-radius: 999px;
+      border: none;
+      background: #f5c542;
+      font-size: 16px;
+    }
+    .screen {
+      width: 100%;
+      max-width: 320px;
+    }
+    #screen-characters {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+    }
+    #screen-gameover {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+    }
+    .char-btn {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: none;
+      font-size: 15px;
+      color: #000;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game"></canvas>
+  </div>
+
+  <!-- HUD overlay (HTML, not in canvas) -->
+  <div style="position:fixed;top:8px;left:8px;right:8px;display:flex;justify-content:space-between;z-index:2;font-size:14px;">
+    <div id="hp-display">HP: 100</div>
+    <div id="time-display">Time: 60</div>
+  </div>
+
+  <!-- On-screen controls -->
+<div class="controls">
+  <div class="controls-inner">
+    <div class="dpad">
+      <button class="btn small" data-dir="up">▲</button>
+      <button class="btn small" data-dir="left">◀</button>
+      <button class="btn small" data-dir="down">▼</button>
+      <button class="btn small" data-dir="right">▶</button>
+    </div>
+    <div class="buttons">
+      <button class="btn face" id="btn-c">C</button>
+      <button class="btn face" id="btn-j">J</button>
+    </div>
+  </div>
+</div>
+
+
+
+  <!-- Overlay with 3 screens: title, character select, game over -->
+  <div id="overlay">
+    <!-- Title screen -->
+    <div id="screen-title" class="screen">
+      <h1 style="margin-bottom:4px;">THORNY THURSDAY: CROWD CONTROL</h1>
+      <p style="margin-top:0;">Survive the set! Dodge heckles and fire jokes.</p>
+      <button id="start-btn">Start Show</button>
+    </div>
+
+    <!-- Character selection -->
+    <div id="screen-characters" class="screen">
+      <h1 style="margin-bottom:4px;">Who’s on stage?</h1>
+      <p style="margin-top:0;margin-bottom:12px;">Choose your comedian for tonight’s show.</p>
+      <button class="char-btn" data-char="Dennis" style="background:#f5a623;">Dennis</button>
+      <button class="char-btn" data-char="Anna"   style="background:#ff6b9c;">Anna</button>
+      <button class="char-btn" data-char="Brielle" style="background:#6ba8ff;">Brielle</button>
+    </div>
+
+    <!-- Game over screen -->
+    <div id="screen-gameover" class="screen">
+      <h1 id="gameover-title" style="margin-bottom:4px;"></h1>
+      <p id="gameover-text" style="margin-top:0;"></p>
+      <button id="play-again-btn">Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    // --- Virtual resolution (pixel-art style) ---
+    const VIRTUAL_WIDTH = 160;
+    const VIRTUAL_HEIGHT = 288;
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      const ww = window.innerWidth;
+      const wh = window.innerHeight;
+      const scale = Math.min(ww / VIRTUAL_WIDTH, wh / VIRTUAL_HEIGHT);
+      const cw = VIRTUAL_WIDTH * scale;
+      const ch = VIRTUAL_HEIGHT * scale;
+      canvas.width = cw;
+      canvas.height = ch;
+      canvas.style.width = cw + 'px';
+      canvas.style.height = ch + 'px';
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // --- Game state ---
+    let running = false;
+    let lastTime = 0;
+    let globalTime = 0;              // global time for animations
+
+    const player = {
+      x: VIRTUAL_WIDTH / 2 - 8,
+      y: 40,
+      w: 16,
+      h: 16,
+      speed: 70, // pixels per second
+      hp: 100,
+      shootCooldown: 0
+    };
+
+    // Character selection (only affects color)
+    const characterColors = {
+      Dennis: '#f5a623',
+      Anna: '#ff6b9c',
+      Brielle: '#6ba8ff'
+    };
+    let currentCharacter = 'Dennis';
+
+    let bullets = []; // jokes
+    let heckles = [];
+    let laughter = [];
+    let sleepParticles = [];        // Z particles for sleepers
+
+    const audienceRows = 4;
+    const audienceCols = 6;
+    const audience = [];
+    const stageY = 0;
+    const stageHeight = 80;
+    const crowdTop = stageY + stageHeight + 8;
+
+    // Fill audience positions
+    for (let r = 0; r < audienceRows; r++) {
+      for (let c = 0; c < audienceCols; c++) {
+        const seatWidth = VIRTUAL_WIDTH / (audienceCols + 1);
+        const x = seatWidth * (c + 1) - 8;
+        const y = crowdTop + r * 24;
+        audience.push({
+          x,
+          y,
+          w: 16,
+          h: 16,
+          state: 'normal',           // normal | sleeper | heckler
+          timer: Math.random() * 3,
+          bobPhase: Math.random() * Math.PI * 2, // per-seat bob offset
+          zTimer: 0                  // timer for spawning Zs
+        });
+      }
+    }
+
+    let heckleTimer = 0;
+    let sleeperTimer = 0;
+    let gameTime = 60; // seconds
+
+    // --- Input handling (virtual buttons) ---
+    const input = { up: false, down: false, left: false, right: false, shoot: false };
+
+    // D-pad
+    const dpadButtons = document.querySelectorAll('.btn.small');
+    dpadButtons.forEach(btn => {
+      const dir = btn.getAttribute('data-dir');
+      const start = e => { e.preventDefault(); input[dir] = true; };
+      const end = e => { e.preventDefault(); input[dir] = false; };
+      btn.addEventListener('touchstart', start);
+      btn.addEventListener('mousedown', start);
+      btn.addEventListener('touchend', end);
+      btn.addEventListener('touchcancel', end);
+      btn.addEventListener('mouseup', end);
+      btn.addEventListener('mouseleave', end);
+    });
+
+    // C & J buttons – both fire a joke for now
+    const btnC = document.getElementById('btn-c');
+    const btnJ = document.getElementById('btn-j');
+
+    const shootStart = e => { e.preventDefault(); input.shoot = true; };
+    const shootEnd   = e => { e.preventDefault(); input.shoot = false; };
+
+    function bindShootButton(el) {
+      el.addEventListener('touchstart', shootStart);
+      el.addEventListener('mousedown', shootStart);
+      el.addEventListener('touchend', shootEnd);
+      el.addEventListener('touchcancel', shootEnd);
+      el.addEventListener('mouseup', shootEnd);
+      el.addEventListener('mouseleave', shootEnd);
+    }
+
+    bindShootButton(btnC);
+    bindShootButton(btnJ);
+
+    // Allow keyboard too (for desktop testing)
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowUp' || e.key === 'w') input.up = true;
+      if (e.key === 'ArrowDown' || e.key === 's') input.down = true;
+      if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+      if (e.key === ' ') input.shoot = true;
+    });
+    window.addEventListener('keyup', e => {
+      if (e.key === 'ArrowUp' || e.key === 'w') input.up = false;
+      if (e.key === 'ArrowDown' || e.key === 's') input.down = false;
+      if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+      if (e.key === ' ') input.shoot = false;
+    });
+
+    // --- Utility ---
+    function clamp(v, min, max) {
+      return v < min ? min : v > max ? max : v;
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w &&
+             a.x + a.w > b.x &&
+             a.y < b.y + b.h &&
+             a.y + a.h > b.y;
+    }
+
+    // --- Game loop ---
+    function update(dt) {
+      if (!running) return;
+
+      gameTime -= dt;
+      if (gameTime <= 0) {
+        gameTime = 0;
+        endGame(true);
+        return;
+      }
+
+      // Player movement
+      let vx = 0, vy = 0;
+      if (input.left) vx -= 1;
+      if (input.right) vx += 1;
+      if (input.up) vy -= 1;
+      if (input.down) vy += 1;
+      const len = Math.hypot(vx, vy) || 1;
+      vx /= len; vy /= len;
+      player.x += vx * player.speed * dt;
+      player.y += vy * player.speed * dt;
+
+      // Constrain to stage
+      player.x = clamp(player.x, 8, VIRTUAL_WIDTH - player.w - 8);
+      player.y = clamp(player.y, 8, stageY + stageHeight - player.h - 8);
+
+      // Shooting
+      player.shootCooldown -= dt;
+      if (input.shoot && player.shootCooldown <= 0) {
+        bullets.push({
+          x: player.x + player.w / 2 - 2,
+          y: player.y + player.h,
+          w: 4,
+          h: 6,
+          vy: 120
+        });
+        player.shootCooldown = 0.25;
+      }
+
+      // Update bullets
+      bullets.forEach(b => b.y += b.vy * dt);
+      bullets = bullets.filter(b => b.y < VIRTUAL_HEIGHT);
+
+      // Audience behaviour: sleepers & hecklers
+      sleeperTimer -= dt;
+      heckleTimer -= dt;
+
+      if (sleeperTimer <= 0) {
+        const candidates = audience.filter(a => a.state === 'normal');
+        if (candidates.length > 0) {
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          pick.state = 'sleeper';
+          pick.zTimer = 0;                       // reset Z timer when they fall asleep
+        }
+        sleeperTimer = 3 + Math.random() * 2;
+      }
+
+      if (heckleTimer <= 0) {
+        const candidates = audience.filter(a => a.state !== 'heckler');
+        if (candidates.length > 0) {
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          pick.state = 'heckler';
+          // spawn heckle projectile immediately
+          const dx = (player.x + player.w / 2) - (pick.x + pick.w / 2);
+          const dy = (player.y + player.h / 2) - (pick.y + pick.h / 2);
+          const l = Math.hypot(dx, dy) || 1;
+          const speed = 70;
+          heckles.push({
+            x: pick.x + pick.w / 2 - 3,
+            y: pick.y,
+            w: 6,
+            h: 6,
+            vx: (dx / l) * speed,
+            vy: (dy / l) * speed
+          });
+        }
+        heckleTimer = 1.5 + Math.random(); // every 1.5–2.5s
+      }
+
+      // Reset audience states slowly & spawn Z particles for sleepers
+      audience.forEach(a => {
+        if (a.state !== 'normal') {
+          a.timer -= dt;
+          if (a.state === 'sleeper') {
+            // sleeper Z particles
+            a.zTimer -= dt;
+            if (a.zTimer <= 0) {
+              sleepParticles.push({
+                x: a.x + a.w / 2 + 3,
+                y: a.y - 6,
+                vy: -10,
+                life: 1.0
+              });
+              a.zTimer = 0.7 + Math.random() * 0.4;
+            }
+          }
+          if (a.timer <= 0) {
+            a.state = 'normal';
+            a.timer = 2 + Math.random() * 3;
+          }
+        }
+      });
+
+      // Bullets vs sleepers
+      bullets.forEach(b => {
+        audience.forEach(a => {
+          if (a.state === 'sleeper' && rectsOverlap(b, a)) {
+            a.state = 'normal';
+            a.timer = 2 + Math.random() * 3;
+            // spawn laughter orb above seat
+            laughter.push({
+              x: a.x + a.w / 2 - 4,
+              y: a.y - 10,
+              w: 8,
+              h: 8,
+              vy: -20,
+              life: 5
+            });
+            b.dead = true;
+          }
+        });
+      });
+      bullets = bullets.filter(b => !b.dead);
+
+      // Update laughter
+      laughter.forEach(l => {
+        l.y += l.vy * dt;
+        l.life -= dt;
+      });
+      laughter = laughter.filter(l => l.life > 0);
+
+      // Player collects laughter = heal
+      laughter.forEach(l => {
+        if (rectsOverlap(player, l)) {
+          player.hp = Math.min(120, player.hp + 10);
+          l.life = 0;
+        }
+      });
+      laughter = laughter.filter(l => l.life > 0);
+
+      // Update heckles
+      heckles.forEach(h => {
+        h.x += h.vx * dt;
+        h.y += h.vy * dt;
+      });
+      heckles = heckles.filter(h => h.x > -20 && h.x < VIRTUAL_WIDTH + 20 && h.y > -20 && h.y < VIRTUAL_HEIGHT + 20);
+
+      // Player hit by heckles
+      heckles.forEach(h => {
+        if (!h.hit && rectsOverlap(player, h)) {
+          h.hit = true;
+          player.hp -= 5;
+        }
+      });
+      heckles = heckles.filter(h => !h.hit);
+
+      if (player.hp <= 0) {
+        player.hp = 0;
+        endGame(false);
+      }
+
+      // Update sleeper Z particles
+      sleepParticles.forEach(p => {
+        p.y += p.vy * dt;
+        p.life -= dt;
+      });
+      sleepParticles = sleepParticles.filter(p => p.life > 0);
+
+      // HUD text
+      document.getElementById('hp-display').textContent = 'HP: ' + Math.round(player.hp);
+      document.getElementById('time-display').textContent = 'Time: ' + Math.ceil(gameTime);
+    }
+
+    function draw() {
+  // Use virtual coordinate system
+  const scaleX = canvas.width / VIRTUAL_WIDTH;
+  const scaleY = canvas.height / VIRTUAL_HEIGHT;
+  ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+  // --------- BASE BACKGROUND ---------
+  ctx.fillStyle = "#05030a";
+  ctx.fillRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+
+  // --------- STAGE WALL + STAGE FLOOR ---------
+  const wallHeight = 46;          // a bit taller wall
+  const stageFloorY = wallHeight;
+
+  // Back wall base (slightly different tone)
+  ctx.fillStyle = "#878BAE";
+  ctx.fillRect(0, 0, VIRTUAL_WIDTH, wallHeight);
+
+  // Back wall brick pattern
+  ctx.fillStyle = "#9C9EB5";
+  const wallBrickH = 6;
+  const wallBrickW = 8;
+  for (let y = 2; y < wallHeight; y += wallBrickH) {
+    const offset = (Math.floor(y / wallBrickH) % 2) ? wallBrickW / 2 : 0;
+    for (let x = -offset; x < VIRTUAL_WIDTH; x += wallBrickW) {
+      ctx.fillRect(x + 1, y, wallBrickW - 2, wallBrickH - 2);
+    }
+  }
+
+  // Stage floor base (a bit lighter and separate from wall)
+  ctx.fillStyle = "#303565";
+  ctx.fillRect(0, stageFloorY, VIRTUAL_WIDTH, stageHeight - stageFloorY);
+
+  // Stage floor horizontal brick strips
+  ctx.fillStyle = "#3b416f";
+  const floorRowH = 6;
+  for (let y = stageFloorY + 2; y < stageHeight; y += floorRowH) {
+    const rowIndex = Math.floor((y - stageFloorY) / floorRowH);
+    const offset = (rowIndex % 2) ? 10 : 0;
+    for (let x = -offset; x < VIRTUAL_WIDTH; x += 24) {
+      ctx.fillRect(x + 2, y, 18, 3);
+    }
+  }
+  // --------- SECRET SIGN ---------
+  ctx.save();
+  ctx.fillStyle = "#ff7a66";  // warm orange-red
+  ctx.font = "12px monospace"; // pixel-ish font
+  ctx.textAlign = "center";
+
+  // Glow background
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = "#ff7a66";
+  ctx.beginPath();
+  ctx.arc(VIRTUAL_WIDTH / 2, 14, 16, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Text (bright)
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ff9b7c";
+  ctx.fillText("SECRET", VIRTUAL_WIDTH / 2, 18);
+
+  ctx.restore();
+
+  // Big circular spotlight crossing wall + stage floor
+  ctx.fillStyle = "#cba5ff";
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  const spotlightCenterY = stageFloorY + (stageHeight - stageFloorY) / 2;
+  ctx.arc(VIRTUAL_WIDTH / 2, spotlightCenterY, 54, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Red side lights (simple triangular beams)
+  ctx.fillStyle = "rgba(255, 80, 120, 0.35)";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(VIRTUAL_WIDTH * 0.10,  0);
+  ctx.lineTo(0, wallHeight);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(VIRTUAL_WIDTH, 0);
+  ctx.lineTo(VIRTUAL_WIDTH, wallHeight);
+  ctx.lineTo(VIRTUAL_WIDTH * 0.90, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // Wall speakers (unchanged)
+  ctx.fillStyle = "#0d0f24";
+  ctx.fillRect(10, 8, 12, 18);
+  ctx.fillRect(VIRTUAL_WIDTH - 22, 8, 12, 18);
+  ctx.fillStyle = "#16192f";
+  ctx.fillRect(12, 10, 8, 14);
+  ctx.fillRect(VIRTUAL_WIDTH - 20, 10, 8, 14);
+
+  // Simple chair on stage (behind the comic)
+  const chairW = 10;
+  const chairH = 12;
+  const chairX = VIRTUAL_WIDTH / 2 - chairW / 2 - 18; // a bit left of centre
+  const chairY = stageHeight - chairH - 6;
+
+  // chair legs
+  ctx.fillStyle = "#151528";
+  ctx.fillRect(chairX + 1, chairY + chairH - 2, 2, 4);
+  ctx.fillRect(chairX + chairW - 3, chairY + chairH - 2, 2, 4);
+  // chair seat
+  ctx.fillRect(chairX, chairY + 5, chairW, 5);
+  // chair back
+  ctx.fillRect(chairX, chairY, 2, 7);
+  ctx.fillRect(chairX + chairW - 2, chairY, 2, 7);
+  ctx.fillRect(chairX, chairY, chairW, 2);
+
+  // Divider between stage and audience
+  ctx.fillStyle = "#111227";
+  ctx.fillRect(0, stageHeight, VIRTUAL_WIDTH, 4);
+
+  // --------- AUDIENCE FLOOR ---------
+  const audienceTop = stageHeight + 4;
+  ctx.fillStyle = "#252845";
+  ctx.fillRect(0, audienceTop, VIRTUAL_WIDTH, VIRTUAL_HEIGHT - audienceTop);
+
+  // Middle aisle
+  const aisleW = 16;
+  const aisleX = VIRTUAL_WIDTH / 2 - aisleW / 2;
+  ctx.fillStyle = "#2b2e4b";
+  ctx.fillRect(aisleX, audienceTop, aisleW, VIRTUAL_HEIGHT - audienceTop);
+
+  // Floor tiles
+  ctx.strokeStyle = "#2f3355";
+  ctx.lineWidth = 1;
+  // vertical lines
+  for (let x = 0; x <= VIRTUAL_WIDTH; x += 16) {
+    if (x > aisleX && x < aisleX + aisleW) continue; // skip inside aisle
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, audienceTop);
+    ctx.lineTo(x + 0.5, VIRTUAL_HEIGHT);
+    ctx.stroke();
+  }
+  // horizontal lines
+  for (let y = audienceTop; y <= VIRTUAL_HEIGHT; y += 16) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(VIRTUAL_WIDTH, y + 0.5);
+    ctx.stroke();
+  }
+
+  // --------- AUDIENCE (DETAILED + ANIMATED) ---------
+  const hairPalette = ["#17152b", "#221b38", "#3d2434", "#1f263f"];
+  const skinPalette = ["#f6b36a", "#e09352", "#c7783e", "#8c5030"];
+
+  audience.forEach((a, i) => {
+    const ax = a.x;
+    const baseY = a.y;
+    const col = i % audienceCols;
+    const row = Math.floor(i / audienceCols);
+
+    // Head bob – small vertical offset
+    let bobAmount = 0;
+    if (a.state === "normal") {
+      bobAmount = Math.sin(globalTime * 3 + a.bobPhase) * 0.8;
+    } else if (a.state === "heckler") {
+      bobAmount = Math.sin(globalTime * 5 + a.bobPhase) * 1.5 - 1;
+    } else if (a.state === "sleeper") {
+      bobAmount = Math.sin(globalTime * 1.5 + a.bobPhase) * 0.4 - 0.5;
+    }
+    const ay = baseY + bobAmount;
+
+    // Base chair
+    ctx.fillStyle = "#181a38";
+    ctx.fillRect(ax + 1, ay + 7, a.w - 2, 7);           // seat
+    ctx.fillStyle = "#22244a";
+    ctx.fillRect(ax + 1, ay + 3, a.w - 2, 4);           // backrest
+    ctx.fillStyle = "#101124";
+    ctx.fillRect(ax + 3, ay + 14, a.w - 6, 2);          // back legs
+
+    // Body
+    ctx.fillStyle = "#2c2654";
+    ctx.fillRect(ax + 3, ay + 8, a.w - 6, 7);           // torso
+    ctx.fillStyle = "#241f45";
+    ctx.fillRect(ax + 4, ay + 9, a.w - 8, 3);           // shirt highlight
+
+    // Choose hair & skin colors with some variation
+    let hairColor = hairPalette[(row + col) % hairPalette.length];
+    let skinColor = skinPalette[(row * 2 + col) % skinPalette.length];
+
+    // Spotlight effect (front row, center-ish)
+    if (row === 0 && (col === 1 || col === 2)) {
+      skinColor = "#ffd79b";
+      hairColor = "#58405f";
+    }
+
+    // State-based tints
+    if (a.state === "sleeper") {
+      hairColor = "#4b4e78";
+    } else if (a.state === "heckler") {
+      hairColor = "#a33646";
+    }
+
+    // Hair shape (outer)
+    ctx.fillStyle = "#050414";
+    ctx.fillRect(ax + 2, ay - 1, a.w - 4, 9);           // dark outline
+    ctx.fillStyle = hairColor;
+    ctx.fillRect(ax + 3, ay, a.w - 6, 7);
+
+    // Face
+    ctx.fillStyle = skinColor;
+    ctx.fillRect(ax + 4, ay + 2, a.w - 8, 5);
+
+    // Neck
+    ctx.fillStyle = skinColor;
+    ctx.fillRect(ax + 6, ay + 7, a.w - 12, 2);
+
+    // Heckler arm animation
+    if (a.state === "heckler") {
+      const swing = Math.sin(globalTime * 10 + a.bobPhase);
+      const armX = ax + (swing > 0 ? a.w - 2 : 2);
+      const armY = ay + 8;
+      ctx.fillStyle = skinColor;
+      ctx.fillRect(armX, armY, 2, 4);
+    }
+  });
+
+  // --------- PLAYER ON STAGE (still a rectangle) ---------
+  const playerColor = characterColors[currentCharacter] || "#f5a623";
+  ctx.fillStyle = playerColor;
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+
+  // tiny stage shadow below player
+  ctx.fillStyle = "#141430";
+  ctx.fillRect(player.x - 2, player.y + player.h, player.w + 4, 2);
+
+  // --------- BULLETS (JOKES) ---------
+  ctx.fillStyle = "#fef8d5";
+  bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+  // --------- HECKLES ---------
+  ctx.fillStyle = "#ff4d7a";
+  heckles.forEach(h => ctx.fillRect(h.x, h.y, h.w, h.h));
+
+  // --------- LAUGHTER ORBS ---------
+  ctx.fillStyle = "#9cff6b";
+  laughter.forEach(l => ctx.fillRect(l.x, l.y, l.w, l.h));
+
+  // --------- SLEEPER Z PARTICLES ---------
+  ctx.fillStyle = "#cdd4ff";
+  ctx.font = "6px monospace";
+  sleepParticles.forEach(p => {
+    ctx.fillText("Z", p.x, p.y);
+  });
+}
+
+
+    function loop(timestamp) {
+      const t = timestamp / 1000;
+      const dt = Math.min(0.05, t - (lastTime || t));
+      lastTime = t;
+      globalTime = t;          // drive animations
+
+      if (running) update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // --- Start / End handling & screens ---
+    const overlay = document.getElementById('overlay');
+    const screenTitle = document.getElementById('screen-title');
+    const screenCharacters = document.getElementById('screen-characters');
+    const screenGameover = document.getElementById('screen-gameover');
+    const startBtn = document.getElementById('start-btn');
+    const charButtons = document.querySelectorAll('.char-btn');
+    const playAgainBtn = document.getElementById('play-again-btn');
+    const gameoverTitle = document.getElementById('gameover-title');
+    const gameoverText = document.getElementById('gameover-text');
+
+    function showTitleScreen() {
+      overlay.style.display = 'flex';
+      screenTitle.style.display = 'block';
+      screenCharacters.style.display = 'none';
+      screenGameover.style.display = 'none';
+    }
+
+    function showCharacterScreen() {
+      overlay.style.display = 'flex';
+      screenTitle.style.display = 'none';
+      screenCharacters.style.display = 'flex';
+      screenGameover.style.display = 'none';
+    }
+
+    function showGameoverScreen(won) {
+      overlay.style.display = 'flex';
+      screenTitle.style.display = 'none';
+      screenCharacters.style.display = 'none';
+      screenGameover.style.display = 'flex';
+      gameoverTitle.textContent = won ? 'You Killed!' : 'You Bombed!';
+      gameoverText.textContent = won
+        ? 'You survived the whole set. Headliner unlocked (in spirit).'
+        : 'The crowd ate you alive. Try a different set or comic!';
+    }
+
+    function resetGame() {
+      player.x = VIRTUAL_WIDTH / 2 - 8;
+      player.y = 40;
+      player.hp = 100;
+      player.shootCooldown = 0;
+
+      bullets = [];
+      heckles = [];
+      laughter = [];
+      sleepParticles = [];
+
+      audience.forEach(a => {
+        a.state = 'normal';
+        a.timer = 1 + Math.random() * 3;
+        a.zTimer = 0;
+      });
+
+      heckleTimer = 1.5;
+      sleeperTimer = 2.5;
+      gameTime = 60;
+    }
+
+    function startGame() {
+      resetGame();
+      running = true;
+      overlay.style.display = 'none';
+    }
+
+    function endGame(won) {
+      running = false;
+      showGameoverScreen(won);
+    }
+
+    // Flow wiring
+    startBtn.onclick = showCharacterScreen;
+
+    charButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentCharacter = btn.getAttribute('data-char');
+        startGame();
+      });
+    });
+
+    playAgainBtn.onclick = showCharacterScreen;
+
+    // Make sure we start on title
+    showTitleScreen();
+  </script>
+</body>
+</html>
+
